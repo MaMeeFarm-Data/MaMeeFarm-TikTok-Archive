@@ -25,13 +25,16 @@ jobs:
           pip install feedparser python-dateutil
       - name: RSS → JSON (metadata only)
         run: python scripts/rss_to_json_archive.py
-      - name: Commit & Push
-        run: |
-          git config user.name "tiktok-archive-bot"
-          git config user.email "bot@mameefarm.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No changes."
-          else
-            git commit -m "archive: update TikTok JSON metadata"
-            git push
+     - name: Commit & Push
+  run: |
+    git config user.name "tiktok-archive-bot"
+    git config user.email "bot@mameefarm.local"
+    git add -A
+    if git diff --cached --quiet; then
+      echo "No changes to commit"
+    else
+      git commit -m "archive: update TikTok JSON metadata $(date)"
+      git push https://x-access-token:${GH_PAT}@github.com/MaMeeFarm-Data/MaMeeFarm-TikTok-Archive.git HEAD:main
+    fi
+  env:
+    GH_PAT: ${{ secrets.GH_PAT }}
