@@ -1,42 +1,134 @@
-name: Pinata Upload Test (MaMeeFarm)
+name: Upload to IPFS via Pinata (auto)
 
 on:
-  workflow_dispatch:  # กดรันเองได้
+  workflow_dispatch: {}
+  # รันอัตโนมัติเมื่อ workflow TikTok เสร็จ
+  workflow_run:
+    workflows: ["TikTok → JSON Archive (metadata only)"]
+    types: [completed]
+  # หรือเมื่อมีการแก้ไขไฟล์ในโฟลเดอร์ ipfs_upload
+  push:
+    branches: [main]
+    paths:
+      - "ipfs_upload/**"
+
+permissions:
+  contents: write   # ต้องใช้เพื่อ commit ผลลัพธ์กลับเข้า repo
+
+env:
+  UPLOAD_GLOB: "ipfs_upload/**/*"     # กำหนดไฟล์/โฟลเดอร์ที่จะอัป (เปลี่ยนได้)
+  RESP_DIR: "pinata_responses"        # โฟลเดอร์เก็บผลลัพธ์การอัปโหลด
 
 jobs:
   pin:
     runs-on: ubuntu-latest
-    env:
-      PINATA_JWT: ${{ secrets.PINATA_JWT }}
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload test file to Pinata
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
         run: |
-          FILE_PATH="tiktok_archive/testdata.json"
-          if [ ! -f "$FILE_PATH" ]; then
-            echo "File not found: $FILE_PATH"; exit 1
-          fi
+          python -m pip install --upgrade pip
+          pip install requests
 
-          echo "Uploading $FILE_PATH to Pinata..."
-          RESPONSE=$(curl -s -X POST "https://api.pinata.cloud/pinning/pinFileToIPFS" \
-            -H "Authorization: Bearer $PINATA_JWT" \
-            -F "file=@$FILE_PATH")
-
-          echo "$RESPONSE" > pinata_response.json
-          echo "Upload done."
-
-      - name: Commit & Push response
+      - name: Upload files to Pinata
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+          UPLOAD_GLOB: ${{ env.UPLOAD_GLOB }}
+          RESP_DIR: ${{ env.RESP_DIR }}
+        run: |
+          set -e
+          python - << 'PY'
+          import glob, json, os, sys, pathlib, time
+          import requests
+
+          jwt = os.environ.get("PINATA_JWT")
+          if not jwt:
+            print("ERROR: Missing secret PINATA_JWT", file=sys.stderr)
+            sys.exit(1)
+
+          pattern = os.environ.get("UPLOAD_GLOB", "ipfs_upload/**/*")
+          resp_dir = os.environ.get("RESP_DIR", "pinata_responses")
+          pathlib.Path(resp_dir).mkdir(parents=True, exist_ok=True)
+
+          files = [p for p in glob.glob(pattern, recursive=True)
+                   if os.path.isfile(p)]
+          if not files:
+            print(f"No files matched: {pattern}. Nothing to upload.")
+            # สร้างไฟล์สรุปว่าง ๆ ไว้ให้เห็นสถานะ
+            with open(os.path.join(resp_dir, "last_run.json"), "w", encoding="utf-8") as f:
+              json.dump({"timestamp": int(time.time()),
+                         "matched": 0, "uploaded": 0}, f, ensure_ascii=False, indent=2)
+            sys.exit(0)
+
+          print(f"Found {len(files)} file(s) to upload")
+
+          headers = {"Authorization": f"Bearer {jwt}"}
+          endpoint = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+
+          uploaded = 0
+          summary = []
+
+          for path in files:
+            filename = os.path.basename(path)
+            print(f"Uploading: {path}")
+            with open(path, "rb") as fh:
+              files_payload = {
+                "file": (filename, fh, "application/octet-stream")
+              }
+              # ตั้ง metadata บน Pinata (ไม่บังคับ)
+              metadata = {
+                "name": filename,
+                "keyvalues": {
+                  "source": "MaMeeFarm-TikTok-Archive",
+                }
+              }
+              data = {
+                "pinataMetadata": json.dumps(metadata)
+              }
+              r = requests.post(endpoint, headers=headers, files=files_payload, data=data, timeout=120)
+            if r.status_code >= 300:
+              print(f"Upload failed ({r.status_code}): {r.text}", file=sys.stderr)
+              item = {"file": path, "status": r.status_code, "error": r.text}
+            else:
+              result = r.json()
+              cid = result.get("IpfsHash")
+              print(f"OK: {path} -> {cid}")
+              item = {"file": path, "cid": cid, "result": result}
+              uploaded += 1
+
+            # บันทึกผลรายไฟล์
+            safe = filename.replace("/", "_")
+            out = os.path.join(resp_dir, f"{safe}.json")
+            with open(out, "w", encoding="utf-8") as f:
+              json.dump(item, f, ensure_ascii=False, indent=2)
+            summary.append(item)
+
+          # บันทึกสรุป
+          with open(os.path.join(resp_dir, "last_run.json"), "w", encoding="utf-8") as f:
+            json.dump({
+              "timestamp": int(time.time()),
+              "matched": len(files),
+              "uploaded": uploaded,
+              "items": summary
+            }, f, ensure_ascii=False, indent=2)
+
+          print(f"Uploaded {uploaded}/{len(files)} file(s)")
+          PY
+
+      - name: Commit & Push responses
         run: |
           git config user.name  "pinata-bot"
           git config user.email "bot@mameefarm.local"
-          git add pinata_response.json || true
+          git add $RESP_DIR || true
           if git diff --cached --quiet; then
-            echo "No new data."; exit 0
+            echo "No changes to commit"
+          else
+            git commit -m "ipfs: add/update Pinata responses"
+            git push
           fi
-          git commit -m "Pinata response"
-          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
