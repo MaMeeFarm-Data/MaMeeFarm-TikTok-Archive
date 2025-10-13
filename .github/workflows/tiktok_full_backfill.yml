@@ -1,1 +1,39 @@
+name: Full TikTok Backfill → Pinata
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "TikTok username (ไม่ต้องใส่ @)"
+        required: true
+        default: "mameefarm"
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: |
+          python -m pip install --upgrade pip
+          pip install yt-dlp jq
+
+      - name: Download TikTok videos
+        env:
+          USERNAME: ${{ github.event.inputs.username }}
+        run: |
+          mkdir -p downloads
+          yt-dlp "https://www.tiktok.com/@${USERNAME}" \
+            --no-warnings --no-part --merge-output-format mp4 \
+            --write-info-json --write-thumbnail \
+            -o "downloads/%(upload_date)s_%(id)s.%(ext)s"
+
+      - name: Commit results
+        run: |
+          git config user.name "MaMeeFarm-Bot"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "download test [skip ci]" || echo "no changes"
+          git push
 
