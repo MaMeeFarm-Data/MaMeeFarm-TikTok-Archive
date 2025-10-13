@@ -1,0 +1,39 @@
+name: Upload to IPFS via Pinata
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # รันทุก 6 ชั่วโมง
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Upload TikTok archive to Pinata
+        env:
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+        run: |
+          echo "Uploading TikTok JSON to Pinata..."
+          FILE_PATH="state/seen.json"
+          if [ -f "$FILE_PATH" ]; then
+            curl -X POST "https://api.pinata.cloud/pinning/pinFileToIPFS" \
+              -H "Authorization: Bearer $PINATA_JWT" \
+              -F "file=@$FILE_PATH" > pinata_response.json
+
+            echo "✅ Upload complete."
+            cat pinata_response.json
+          else
+            echo "⚠️ No TikTok data file found. Skipping upload."
+          fi
