@@ -1,0 +1,35 @@
+name: Pinata Selective Upload (only marked originals)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"   # รันทุก 6 ชั่วโมง
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      - name: Upload originals with rights.upload_to_ipfs=true
+        env:
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+        run: python scripts/pinata_selective_upload.py
+      - name: Commit & Push
+        run: |
+          git config user.name "pinata-selective-bot"
+          git config user.email "bot@mameefarm.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else:
+            git commit -m "ipfs: update JSON with CID for marked originals"
+            git push
