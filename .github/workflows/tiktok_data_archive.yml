@@ -12,7 +12,8 @@ jobs:
       contents: write
     env:
       TIKTOK_USERNAME: "mameefarm"   # ← แก้เป็นชื่อช่อง (ไม่ต้องใส่ @)
-      RSS_BASE: "https://rsshub.app"
+      RSS_BASE: "https://rsshub.hellogithub.workers.dev"
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
