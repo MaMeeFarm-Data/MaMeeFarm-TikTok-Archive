@@ -1,9 +1,9 @@
 name: TikTok → JSON Archive (metadata only)
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "*/10 * * * *"   # รันทุก 10 นาที
-  workflow_dispatch:
 
 jobs:
   archive:
@@ -11,8 +11,9 @@ jobs:
     permissions:
       contents: write
     env:
-      TIKTOK_USERNAME: "mameefarm"   # ← แก้เป็นชื่อช่อง (ไม่ต้องใส่ @)
+      TIKTOK_USERNAME: "mameefarm"
       RSS_BASE: "https://rsshub.hellogithub.workers.dev"
+
 
     steps:
       - uses: actions/checkout@v4
