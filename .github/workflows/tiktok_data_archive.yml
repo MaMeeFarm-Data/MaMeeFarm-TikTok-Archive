@@ -3,20 +3,20 @@ name: TikTok → JSON Archive (metadata only)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"   # run every 10 minutes
+    - cron: "*/10 * * * *"   # Run every 10 minutes
 
 jobs:
   archive:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write    # ให้ GitHub Actions เขียนไฟล์ใน repo ได้
 
     env:
-      TIKTOK_USERNAME: "mameefarm"                     # ← เปลี่ยนชื่อช่องได้ (ไม่ต้องใส่ @)
+      TIKTOK_USERNAME: "mameefarm"   # แก้ชื่อช่องได้ (ไม่ต้องใส่ @)
       RSS_BASE: "https://rsshub.hellogithub.workers.dev"
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -26,24 +26,34 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install feedparser python-dateutil requests
 
-      - name: RSS → JSON (metadata only)
+      - name: Verify Script Exists
+        run: |
+          echo "Checking for rss_to_json_archive.py..."
+          if [ ! -f "scripts/rss_to_json_archive.py" ]; then
+            echo "Error: scripts/rss_to_json_archive.py not found!"
+            exit 1
+          fi
+
+      - name: Run TikTok RSS → JSON
         run: python scripts/rss_to_json_archive.py
 
-      - name: Commit & Push
+      - name: Commit & Push Updates
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}                 # ← ใช้โทเคนที่เพิ่มใน Secrets
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "tiktok-archive-bot"
           git config user.email "bot@mameefarm.local"
+
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "archive: update TikTok JSON metadata $(date)"
-            git push https://x-access-token:${GH_PAT}@github.com/MaMeeFarm-Data/MaMeeFarm-TikTok-Archive.git HEAD:main
+            echo "No new data to commit."
+            exit 0
           fi
+
+          git commit -m "archive: update TikTok JSON metadata $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push https://x-access-token:${GITHUB_TOKEN}@github.com/MaMeeFarm-Data/MaMeeFarm-TikTok-Archive.git
