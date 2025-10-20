@@ -1,0 +1,43 @@
+name: TikTok oEmbed Archive (No API)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */12 * * *"   # รันทุก 12 ชม.
+
+jobs:
+  fetch-oembed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare dirs
+        run: mkdir -p data/tiktok/oembed data/tiktok/thumbs data/tiktok/links data/ai/manifests
+      - name: Resolve short links (vt.tiktok) -> canonical
+        run: |
+          > data/tiktok/links/canonical.dedup.txt
+          while read -r URL; do
+            [ -z "$URL" ] && continue
+            FINAL=$(curl -sIL -o /dev/null -w '%{url_effective}' -L "$URL" || echo "$URL")
+            echo "$FINAL" >> data/tiktok/links/canonical.dedup.txt
+          done < tiktok/urls.txt
+          sort -u -o data/tiktok/links/canonical.dedup.txt data/tiktok/links/canonical.dedup.txt
+      - name: Fetch oEmbed + thumbnail
+        run: |
+          touch data/ai/manifests/index.ndjson
+          while read -r URL; do
+            [ -z "$URL" ] && continue
+            ID=$(echo "$URL" | sed 's#.*/video/##; s#[^0-9].*$##')
+            [ -z "$ID" ] && continue
+            OE="data/tiktok/oembed/${ID}.json"
+            curl -s "https://www.tiktok.com/oembed?url=$URL" -o "$OE"
+            TITLE=$(jq -r '.title' "$OE" 2>/dev/null || echo "")
+            THUMB=$(jq -r '.thumbnail_url' "$OE" 2>/dev/null || echo "")
+            [ -n "$THUMB" ] && curl -sL "$THUMB" -o "data/tiktok/thumbs/${ID}.jpg" || true
+            echo "{\"uid\":\"tt-${ID}\",\"source_type\":\"tiktok-meta\",\"url\":\"$URL\",\"oembed\":\"$OE\",\"thumb\":\"data/tiktok/thumbs/${ID}.jpg\",\"title\":\"${TITLE}\",\"created_at\":\"$(date -u +%FT%TZ)\"}" >> data/ai/manifests/index.ndjson
+          done < data/tiktok/links/canonical.dedup.txt
+      - name: Commit
+        run: |
+          git config user.name "MaMeeFarm-Bot"
+          git config user.email "bot@mameefarm.com"
+          git add data/tiktok/oembed/*.json data/tiktok/thumbs/* data/tiktok/links/*.txt data/ai/manifests/index.ndjson
+          git commit -m "Archive TikTok via public oEmbed" || echo "No changes"
+          git push
